@@ -65,4 +65,4 @@ async def script(interaction: discord.Interaction, nombre: str):
         await interaction.response.send_message(f'❌ No se encontró ningún script guardado con el nombre **"{clave}"**.', ephemeral=True)
 
 # PEGA TU TOKEN AQUÍ ENTRE LAS COMILLAS
-bot.run('MTU2NjU0NjI5Nzc2OTQzNTMxNg.GO0fox.MNtFqMAXqiMNxa_iqzA5Tb2eTU6n-GIWMRNfO0'))
+bot.run('MTU2NjU0NjI5Nzc2OTQzNTMxNg.GO0fox.MNtFqMAXqiMNxa_iqzA5Tb2eTU6n-GIWMRNfO0')
