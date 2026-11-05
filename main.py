@@ -1,5 +1,6 @@
 import os
 import json
+import aiohttp
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import discord
@@ -7,7 +8,6 @@ from discord import app_commands
 
 ARCHIVO_SCRIPTS = "scripts.json"
 
-# Funciones para cargar y guardar los scripts en un archivo local
 def cargar_scripts():
     if os.path.exists(ARCHIVO_SCRIPTS):
         try:
@@ -21,7 +21,6 @@ def guardar_en_disco(data):
     with open(ARCHIVO_SCRIPTS, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# Servidor web falso para Render
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -57,20 +56,15 @@ async def on_ready():
 def es_superior_al_bot(interaction: discord.Interaction):
     if interaction.user == interaction.guild.owner:
         return True
-
     if interaction.user.guild_permissions.administrator:
         return True
-
     me = interaction.guild.me
     if not me or not me.roles:
         return False
-
     rol_mas_alto_del_bot = max(me.roles, key=lambda r: r.position)
-
     for role in interaction.user.roles:
         if role.position > rol_mas_alto_del_bot.position:
             return True
-
     return False
 
 # --- COMANDO /meter ---
@@ -82,7 +76,6 @@ async def meter(interaction: discord.Interaction, nombre: str, texto: str):
         return
 
     clave = nombre.lower().strip()
-    
     if clave not in bot.scripts_guardados:
         bot.scripts_guardados[clave] = []
     
@@ -99,13 +92,7 @@ class SelectorDeScripts(discord.ui.View):
         opciones = []
         for index, texto in enumerate(lista_scripts):
             descripcion_corta = texto[:50] + "..." if len(texto) > 50 else texto
-            opciones.append(
-                discord.SelectOption(
-                    label=f"Opción {index + 1}", 
-                    description=descripcion_corta, 
-                    value=str(index)
-                )
-            )
+            opciones.append(discord.SelectOption(label=f"Opción {index + 1}", description=descripcion_corta, value=str(index)))
         self.add_item(MenuDesplegable(opciones, nombre_categoria, lista_scripts))
 
 class MenuDesplegable(discord.ui.Select):
@@ -124,10 +111,8 @@ class MenuDesplegable(discord.ui.Select):
 @app_commands.describe(nombre='El nombre de la categoría que quieres buscar (ej: adoptme)')
 async def script(interaction: discord.Interaction, nombre: str):
     clave = nombre.lower().strip()
-
     if clave in bot.scripts_guardados and len(bot.scripts_guardados[clave]) > 0:
         lista_scripts = bot.scripts_guardados[clave]
-        
         if len(lista_scripts) == 1:
             await interaction.response.send_message(f'📤 **Script para `{clave}`**:\n{lista_scripts[0]}')
         else:
@@ -143,13 +128,7 @@ class SelectorParaBorrar(discord.ui.View):
         opciones = []
         for index, texto in enumerate(lista_scripts):
             descripcion_corta = texto[:50] + "..." if len(texto) > 50 else texto
-            opciones.append(
-                discord.SelectOption(
-                    label=f"Opción {index + 1}", 
-                    description=descripcion_corta, 
-                    value=str(index)
-                )
-            )
+            opciones.append(discord.SelectOption(label=f"Opción {index + 1}", description=descripcion_corta, value=str(index)))
         self.add_item(MenuBorrarSelect(opciones, nombre_categoria, lista_scripts, bot_instance))
 
 class MenuBorrarSelect(discord.ui.Select):
@@ -161,22 +140,16 @@ class MenuBorrarSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         indice_elegido = int(self.values[0])
-        
-        # Eliminamos el script seleccionado de la lista
         script_eliminado = self.lista_scripts.pop(indice_elegido)
         
-        # Si la categoría se queda sin scripts, la borramos por completo del diccionario
         if len(self.lista_scripts) == 0:
             del self.bot_instance.scripts_guardados[self.nombre_categoria]
         else:
             self.bot_instance.scripts_guardados[self.nombre_categoria] = self.lista_scripts
         
-        # Guardar los cambios actualizados en el disco
         guardar_en_disco(self.bot_instance.scripts_guardados)
-        
         await interaction.response.send_message(f'🗑️ **Script eliminado con éxito** de la categoría `{self.nombre_categoria}` (Opción {indice_elegido + 1}).', ephemeral=True)
 
-# --- COMANDO /borar ---
 @bot.tree.command(name='borar', description='Elimina un script específico (Solo rangos por encima del bot)')
 @app_commands.describe(nombre='El nombre de la categoría del script a borrar (ej: adoptme)')
 async def borar(interaction: discord.Interaction, nombre: str):
@@ -185,12 +158,56 @@ async def borar(interaction: discord.Interaction, nombre: str):
         return
 
     clave = nombre.lower().strip()
-
     if clave in bot.scripts_guardados and len(bot.scripts_guardados[clave]) > 0:
         lista_scripts = bot.scripts_guardados[clave]
         view = SelectorParaBorrar(lista_scripts, clave, bot)
         await interaction.response.send_message(f'🗑️ Selecciona el script que deseas **borrar** de la categoría **"{clave}"**:', view=view, ephemeral=True)
     else:
         await interaction.response.send_message(f'❌ No se encontró ningún script guardado bajo el nombre **"{clave}"** para borrar.', ephemeral=True)
+
+# --- NUEVO COMANDO /buscar (Busca en ScriptBlox) ---
+class SelectorResultadosScriptBlox(discord.ui.View):
+    def __init__(self, scripts_encontrados):
+        super().__init__(timeout=60)
+        opciones = []
+        for index, item in enumerate(scripts_encontrados[:25]): # Discord permite máximo 25 opciones en un menú
+            titulo = item.get("title", "Sin título")[:95]
+            slug = item.get("slug", "")
+            opciones.append(discord.SelectOption(label=titulo[:100], value=slug))
+        self.add_item(MenuSeleccionScriptBlox(opciones))
+
+class MenuSeleccionScriptBlox(discord.ui.Select):
+    def __init__(self, opciones):
+        super().__init__(placeholder="Selecciona un resultado para ver el enlace...", min_values=1, max_values=1, options=opciones)
+
+    async def callback(self, interaction: discord.Interaction):
+        slug_seleccionado = self.values[0]
+        enlace_web = f"https://scriptblox.com/script/{slug_seleccionado}"
+        await interaction.response.send_message(f'🌐 Aquí tienes el enlace directo al script en ScriptBlox:\n{enlace_web}', ephemeral=True)
+
+@bot.tree.command(name='buscar', description='Busca scripts directamente en ScriptBlox por internet')
+@app_commands.describe(query='Nombre del juego o script que quieres buscar (ej: adoptme)')
+async def buscar(interaction: discord.Interaction, query: str):
+    await interaction.response.defer(thinking=True)
+    
+    url = f"https://scriptblox.com/api/script/search?q={query}"
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    scripts = data.get("result", {}).get("scripts", [])
+                    
+                    if not scripts:
+                        await interaction.followup.send(f'❌ No se han encontrado resultados en ScriptBlox para **"{query}"**.')
+                        return
+                    
+                    view = SelectorResultadosScriptBlox(scripts)
+                    await interaction.followup.send(f'🔍 Resultados de ScriptBlox para **"{query}"**:', view=view)
+                else:
+                    await interaction.followup.send('❌ Hubo un error al conectar con la página de ScriptBlox.')
+        except Exception as e:
+            await interaction.followup.send(f'❌ Ocurrió un error inesperado al realizar la búsqueda.')
 
 bot.run(os.getenv('DISCORD_TOKEN'))
