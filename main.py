@@ -165,28 +165,39 @@ async def borar(interaction: discord.Interaction, nombre: str):
     else:
         await interaction.response.send_message(f'❌ No se encontró ningún script guardado bajo el nombre **"{clave}"** para borrar.', ephemeral=True)
 
-# --- NUEVO COMANDO /buscar (Busca en ScriptBlox) ---
+# --- COMANDO /buscar (ScriptBlox con código directo) ---
 class SelectorResultadosScriptBlox(discord.ui.View):
     def __init__(self, scripts_encontrados):
         super().__init__(timeout=60)
         opciones = []
-        for index, item in enumerate(scripts_encontrados[:25]): # Discord permite máximo 25 opciones en un menú
+        for index, item in enumerate(scripts_encontrados[:25]):
             titulo = item.get("title", "Sin título")[:95]
-            slug = item.get("slug", "")
-            opciones.append(discord.SelectOption(label=titulo[:100], value=slug))
-        self.add_item(MenuSeleccionScriptBlox(opciones))
+            opciones.append(discord.SelectOption(label=titulo[:100], value=str(index)))
+        self.scripts_encontrados = scripts_encontrados
+        self.add_item(MenuSeleccionScriptBlox(opciones, scripts_encontrados))
 
 class MenuSeleccionScriptBlox(discord.ui.Select):
-    def __init__(self, opciones):
-        super().__init__(placeholder="Selecciona un resultado para ver el enlace...", min_values=1, max_values=1, options=opciones)
+    def __init__(self, opciones, scripts_encontrados):
+        self.scripts_encontrados = scripts_encontrados
+        super().__init__(placeholder="Elige un script para ver su código...", min_values=1, max_values=1, options=opciones)
 
     async def callback(self, interaction: discord.Interaction):
-        slug_seleccionado = self.values[0]
-        enlace_web = f"https://scriptblox.com/script/{slug_seleccionado}"
-        await interaction.response.send_message(f'🌐 Aquí tienes el enlace directo al script en ScriptBlox:\n{enlace_web}', ephemeral=True)
+        indice = int(self.values[0])
+        script_seleccionado = self.scripts_encontrados[indice]
+        
+        titulo = script_seleccionado.get("title", "Script")
+        codigo_script = script_seleccionado.get("script", "No se encontró el código o el script está cifrado.")
+        
+        if len(codigo_script) > 1950:
+            codigo_script = codigo_script[:1950] + "\n-- [Código recortado por ser demasiado largo]"
 
-@bot.tree.command(name='buscar', description='Busca scripts directamente en ScriptBlox por internet')
-@app_commands.describe(query='Nombre del juego o script que quieres buscar (ej: adoptme)')
+        await interaction.response.send_message(
+            f'📜 **{titulo}**:\n```lua\n{codigo_script}\n```', 
+            ephemeral=True
+        )
+
+@bot.tree.command(name='buscar', description='Busca scripts en ScriptBlox y muestra el código directamente')
+@app_commands.describe(query='Nombre del juego o script que quieres buscar (ej: bloxfruit)')
 async def buscar(interaction: discord.Interaction, query: str):
     await interaction.response.defer(thinking=True)
     
@@ -204,7 +215,7 @@ async def buscar(interaction: discord.Interaction, query: str):
                         return
                     
                     view = SelectorResultadosScriptBlox(scripts)
-                    await interaction.followup.send(f'🔍 Resultados de ScriptBlox para **"{query}"**:', view=view)
+                    await interaction.followup.send(f'🔍 Resultados encontrados en ScriptBlox para **"{query}"**. Selecciona uno:', view=view)
                 else:
                     await interaction.followup.send('❌ Hubo un error al conectar con la página de ScriptBlox.')
         except Exception as e:
